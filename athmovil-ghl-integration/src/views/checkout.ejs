@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %></title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      background: #f5f5f5;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .checkout-container {
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      padding: 30px;
+      width: 100%;
+      max-width: 400px;
+    }
+
+    .checkout-header {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+
+    .checkout-header h1 {
+      font-size: 20px;
+      color: #333;
+      margin-bottom: 8px;
+    }
+
+    .amount {
+      font-size: 36px;
+      font-weight: bold;
+      color: #e31837;
+    }
+
+    .product-name {
+      color: #666;
+      margin-top: 8px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      color: #333;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 14px;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      font-size: 16px;
+      transition: border-color 0.2s;
+    }
+
+    .form-group input:focus {
+      outline: none;
+      border-color: #e31837;
+    }
+
+    .form-group small {
+      display: block;
+      margin-top: 6px;
+      color: #888;
+      font-size: 12px;
+    }
+
+    .btn-athmovil {
+      width: 100%;
+      padding: 16px;
+      background: #e31837;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .btn-athmovil:hover {
+      background: #c41230;
+    }
+
+    .btn-athmovil:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    .btn-athmovil img {
+      height: 24px;
+    }
+
+    .status {
+      text-align: center;
+      padding: 20px;
+    }
+
+    .status.pending {
+      color: #f59e0b;
+    }
+
+    .status.success {
+      color: #10b981;
+    }
+
+    .status.error {
+      color: #ef4444;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #e31837;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 16px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .powered-by {
+      text-align: center;
+      margin-top: 20px;
+      color: #999;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="checkout-container">
+    <!-- Initial Form -->
+    <div id="formSection">
+      <div class="checkout-header">
+        <h1>Pagar con ATH Movil</h1>
+        <div class="amount" id="displayAmount">$0.00</div>
+        <div class="product-name" id="displayProduct"></div>
+      </div>
+
+      <form id="checkoutForm">
+        <div class="form-group">
+          <label for="phoneNumber">Numero de ATH Movil</label>
+          <input
+            type="tel"
+            id="phoneNumber"
+            name="phoneNumber"
+            placeholder="787-123-4567"
+            pattern="[0-9]{10}"
+            required
+          >
+          <small>Recibiras una notificacion en tu app ATH Movil</small>
+        </div>
+
+        <button type="submit" class="btn-athmovil" id="payButton">
+          Pagar con ATH Movil
+        </button>
+      </form>
+    </div>
+
+    <!-- Waiting for payment -->
+    <div id="waitingSection" class="hidden">
+      <div class="status pending">
+        <div class="spinner"></div>
+        <h2>Esperando Confirmacion</h2>
+        <p>Abre tu app ATH Movil y confirma el pago</p>
+        <p id="waitingTimer">Tiempo restante: 10:00</p>
+      </div>
+    </div>
+
+    <!-- Success -->
+    <div id="successSection" class="hidden">
+      <div class="status success">
+        <h2>✅ Pago Completado!</h2>
+        <p>Referencia: <span id="referenceNumber"></span></p>
+      </div>
+    </div>
+
+    <!-- Error -->
+    <div id="errorSection" class="hidden">
+      <div class="status error">
+        <h2>❌ Error</h2>
+        <p id="errorMessage"></p>
+        <button onclick="location.reload()" class="btn-athmovil" style="margin-top: 20px;">
+          Intentar de Nuevo
+        </button>
+      </div>
+    </div>
+
+    <div class="powered-by">
+      Procesado de forma segura por ATH Movil
+    </div>
+  </div>
+
+  <script>
+    const BASE_URL = '<%= baseUrl %>';
+    let paymentData = null;
+    let chargeId = null;
+    let pollInterval = null;
+    let timeoutSeconds = 600;
+
+    // Listen for payment props from GHL parent iframe
+    window.addEventListener('message', function(event) {
+      console.log('Message received:', event.data);
+
+      if (event.data.type === 'payment_initiate_props') {
+        paymentData = event.data;
+        document.getElementById('displayAmount').textContent = '$' + paymentData.amount.toFixed(2);
+        if (paymentData.productDetails?.name) {
+          document.getElementById('displayProduct').textContent = paymentData.productDetails.name;
+        }
+      }
+    });
+
+    // Notify parent that we're ready
+    window.parent.postMessage({ type: 'custom_provider_ready' }, '*');
+
+    // Handle form submission
+    document.getElementById('checkoutForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+
+      const phoneNumber = document.getElementById('phoneNumber').value.replace(/\D/g, '');
+      const payButton = document.getElementById('payButton');
+
+      payButton.disabled = true;
+      payButton.textContent = 'Procesando...';
+
+      try {
+        // Initiate payment
+        const response = await fetch(BASE_URL + '/payments/initiate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            locationId: paymentData?.locationId || '<%= locationId %>',
+            transactionId: paymentData?.transactionId || 'test-' + Date.now(),
+            amount: paymentData?.amount || 1.00,
+            currency: paymentData?.currency || 'USD',
+            productDetails: paymentData?.productDetails,
+            contact: paymentData?.contact,
+            phoneNumber: phoneNumber,
+          }),
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          chargeId = result.chargeId;
+          showWaitingSection();
+          startPolling();
+        } else {
+          showError(result.message || 'Error iniciando pago');
+        }
+      } catch (error) {
+        showError('Error de conexion: ' + error.message);
+      }
+    });
+
+    function showWaitingSection() {
+      document.getElementById('formSection').classList.add('hidden');
+      document.getElementById('waitingSection').classList.remove('hidden');
+      startTimer();
+    }
+
+    function showSuccess(referenceNumber) {
+      clearInterval(pollInterval);
+      document.getElementById('waitingSection').classList.add('hidden');
+      document.getElementById('successSection').classList.remove('hidden');
+      document.getElementById('referenceNumber').textContent = referenceNumber || chargeId;
+
+      // Notify GHL parent of success
+      window.parent.postMessage({
+        type: 'custom_element_success_response',
+        chargeId: chargeId,
+      }, '*');
+    }
+
+    function showError(message) {
+      clearInterval(pollInterval);
+      document.getElementById('formSection').classList.add('hidden');
+      document.getElementById('waitingSection').classList.add('hidden');
+      document.getElementById('errorSection').classList.remove('hidden');
+      document.getElementById('errorMessage').textContent = message;
+
+      // Notify GHL parent of error
+      window.parent.postMessage({
+        type: 'custom_element_error_response',
+        error: message,
+      }, '*');
+    }
+
+    function startTimer() {
+      const timerElement = document.getElementById('waitingTimer');
+      const interval = setInterval(() => {
+        timeoutSeconds--;
+        const minutes = Math.floor(timeoutSeconds / 60);
+        const seconds = timeoutSeconds % 60;
+        timerElement.textContent = `Tiempo restante: ${minutes}:${seconds.toString().padStart(2, '0')}`;
+
+        if (timeoutSeconds <= 0) {
+          clearInterval(interval);
+          showError('El tiempo de pago ha expirado');
+        }
+      }, 1000);
+    }
+
+    function startPolling() {
+      pollInterval = setInterval(async () => {
+        try {
+          const response = await fetch(BASE_URL + '/payments/status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chargeId: chargeId,
+              locationId: paymentData?.locationId || '<%= locationId %>',
+            }),
+          });
+
+          const result = await response.json();
+
+          if (result.status === 'completed') {
+            showSuccess(result.referenceNumber);
+          } else if (result.status === 'cancelled') {
+            showError('Pago cancelado por el usuario');
+          } else if (result.status === 'expired') {
+            showError('El tiempo de pago ha expirado');
+          }
+          // If pending, continue polling
+        } catch (error) {
+          console.error('Polling error:', error);
+        }
+      }, 3000); // Poll every 3 seconds
+    }
+  </script>
+</body>
+</html>

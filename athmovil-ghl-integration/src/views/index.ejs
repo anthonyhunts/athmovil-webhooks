@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %></title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>ATH Movil para Go High Level</h1>
+      <p class="subtitle">Acepta pagos con ATH Movil en tu cuenta de Go High Level</p>
+    </header>
+
+    <main>
+      <section class="hero">
+        <div class="hero-content">
+          <h2>Integra ATH Movil en minutos</h2>
+          <p>Permite a tus clientes pagar con ATH Movil directamente desde tu cuenta de Go High Level.</p>
+
+          <div class="features">
+            <div class="feature">
+              <span class="icon">💳</span>
+              <h3>Pagos Seguros</h3>
+              <p>Transacciones procesadas directamente por ATH Movil</p>
+            </div>
+            <div class="feature">
+              <span class="icon">⚡</span>
+              <h3>Instantaneo</h3>
+              <p>Recibe pagos al instante en tu cuenta</p>
+            </div>
+            <div class="feature">
+              <span class="icon">🇵🇷</span>
+              <h3>Puerto Rico</h3>
+              <p>Acepta pagos de 1.5M+ usuarios de ATH Movil</p>
+            </div>
+          </div>
+
+          <a href="/oauth/install" class="btn btn-primary btn-large">Instalar en Go High Level</a>
+        </div>
+      </section>
+
+      <section class="requirements">
+        <h2>Requisitos</h2>
+        <ul>
+          <li>Cuenta de Go High Level activa</li>
+          <li>Cuenta de ATH Movil Business activa</li>
+          <li>Tarjeta ATH registrada y verificada</li>
+          <li>API Keys de ATH Movil Business</li>
+        </ul>
+      </section>
+
+      <section class="stats">
+        <h2>Estado del Sistema</h2>
+        <div class="stats-grid">
+          <div class="stat">
+            <span class="stat-value"><%= stats.locations %></span>
+            <span class="stat-label">Locations Instaladas</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value"><%= stats.transactions %></span>
+            <span class="stat-label">Transacciones</span>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>ATH Movil es una marca registrada de EVERTEC. Esta integracion no esta afiliada con EVERTEC.</p>
+    </footer>
+  </div>
+</body>
+</html>

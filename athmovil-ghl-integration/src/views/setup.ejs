@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %></title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Configurar ATH Movil</h1>
+      <p class="subtitle">Location ID: <code><%= locationId %></code></p>
+    </header>
+
+    <main>
+      <% if (hasATHConfig) { %>
+        <div class="alert alert-success">
+          <strong>✅ Configurado!</strong> Esta location ya tiene credenciales de ATH Movil configuradas.
+        </div>
+      <% } %>
+
+      <section class="setup-form">
+        <h2>Credenciales de ATH Movil Business</h2>
+        <p>Ingresa las API Keys de tu cuenta de ATH Movil Business.</p>
+
+        <form id="setupForm">
+          <input type="hidden" name="locationId" value="<%= locationId %>">
+
+          <div class="form-group">
+            <label for="athmovilPublicToken">Public Token</label>
+            <input
+              type="text"
+              id="athmovilPublicToken"
+              name="athmovilPublicToken"
+              placeholder="Tu Public Token de ATH Movil Business"
+              value="<%= location?.athmovilPublicToken || '' %>"
+              required
+            >
+            <small>Encontrado en ATH Movil Business App → Settings → Development</small>
+          </div>
+
+          <div class="form-group">
+            <label for="athmovilPrivateToken">Private Token</label>
+            <input
+              type="password"
+              id="athmovilPrivateToken"
+              name="athmovilPrivateToken"
+              placeholder="Tu Private Token de ATH Movil Business"
+              value="<%= location?.athmovilPrivateToken || '' %>"
+              required
+            >
+            <small>Mantener este token seguro - nunca compartirlo</small>
+          </div>
+
+          <div class="form-group">
+            <label>
+              <input type="checkbox" id="testMode">
+              Usar modo de prueba (dummy token)
+            </label>
+            <small>Activa esto para probar sin procesar pagos reales</small>
+          </div>
+
+          <button type="submit" class="btn btn-primary">Guardar Configuracion</button>
+        </form>
+
+        <div id="result" class="result" style="display: none;"></div>
+      </section>
+
+      <section class="next-steps">
+        <h2>Siguientes Pasos</h2>
+
+        <div class="step">
+          <span class="step-number">1</span>
+          <div class="step-content">
+            <h3>Configura el Payment Provider en GHL</h3>
+            <p>Ve a tu sub-cuenta en Go High Level:</p>
+            <ol>
+              <li>Settings → Integrations → Payments</li>
+              <li>Busca "ATH Movil" en la lista de proveedores</li>
+              <li>Haz clic en "Connect" y luego "Set as Default"</li>
+            </ol>
+          </div>
+        </div>
+
+        <div class="step">
+          <span class="step-number">2</span>
+          <div class="step-content">
+            <h3>Prueba un Pago</h3>
+            <p>Crea un producto o factura y realiza un pago de prueba.</p>
+          </div>
+        </div>
+
+        <div class="info-box">
+          <h4>URLs de Configuracion para GHL</h4>
+          <p>Si necesitas configurar manualmente en GHL, usa estas URLs:</p>
+          <ul>
+            <li><strong>Query URL:</strong> <code><%= baseUrl %>/query</code></li>
+            <li><strong>Payments URL:</strong> <code><%= baseUrl %>/payments/checkout</code></li>
+            <li><strong>Webhook URL:</strong> <code><%= baseUrl %>/webhooks/ghl</code></li>
+          </ul>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <a href="/">← Volver al inicio</a>
+    </footer>
+  </div>
+
+  <script>
+    document.getElementById('testMode').addEventListener('change', function() {
+      const publicInput = document.getElementById('athmovilPublicToken');
+      if (this.checked) {
+        publicInput.value = 'dummy';
+        publicInput.readOnly = true;
+      } else {
+        publicInput.value = '';
+        publicInput.readOnly = false;
+      }
+    });
+
+    document.getElementById('setupForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+
+      const formData = new FormData(this);
+      const data = Object.fromEntries(formData);
+      const resultDiv = document.getElementById('result');
+
+      try {
+        const response = await fetch('/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+
+        const result = await response.json();
+
+        resultDiv.style.display = 'block';
+        if (result.success) {
+          resultDiv.className = 'result alert alert-success';
+          resultDiv.innerHTML = '✅ Configuracion guardada exitosamente!';
+        } else {
+          resultDiv.className = 'result alert alert-error';
+          resultDiv.innerHTML = '❌ Error: ' + result.message;
+        }
+      } catch (error) {
+        resultDiv.style.display = 'block';
+        resultDiv.className = 'result alert alert-error';
+        resultDiv.innerHTML = '❌ Error de conexion: ' + error.message;
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %></title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Instalar ATH Movil</h1>
+      <p class="subtitle">Conecta tu cuenta de Go High Level con ATH Movil</p>
+    </header>
+
+    <main>
+      <section class="install-steps">
+        <h2>Pasos de Instalacion</h2>
+
+        <div class="step">
+          <span class="step-number">1</span>
+          <div class="step-content">
+            <h3>Autoriza la Aplicacion</h3>
+            <p>Haz clic en el boton de abajo para conectar tu cuenta de Go High Level.</p>
+          </div>
+        </div>
+
+        <div class="step">
+          <span class="step-number">2</span>
+          <div class="step-content">
+            <h3>Selecciona la Sub-cuenta</h3>
+            <p>Elige la sub-cuenta (location) donde quieres habilitar pagos con ATH Movil.</p>
+          </div>
+        </div>
+
+        <div class="step">
+          <span class="step-number">3</span>
+          <div class="step-content">
+            <h3>Configura ATH Movil</h3>
+            <p>Ingresa tus API Keys de ATH Movil Business para completar la configuracion.</p>
+          </div>
+        </div>
+
+        <div class="install-action">
+          <a href="/oauth/authorize" class="btn btn-primary btn-large">
+            Conectar con Go High Level
+          </a>
+          <p class="note">Seras redirigido a Go High Level para autorizar la aplicacion.</p>
+        </div>
+      </section>
+
+      <section class="requirements-box">
+        <h3>Antes de continuar, asegurate de tener:</h3>
+        <ul class="checklist">
+          <li>
+            <input type="checkbox" id="req1">
+            <label for="req1">Acceso de administrador a tu cuenta de Go High Level</label>
+          </li>
+          <li>
+            <input type="checkbox" id="req2">
+            <label for="req2">Cuenta de ATH Movil Business activa</label>
+          </li>
+          <li>
+            <input type="checkbox" id="req3">
+            <label for="req3">Public Token y Private Token de ATH Movil Business</label>
+          </li>
+        </ul>
+
+        <div class="help-box">
+          <h4>¿Donde encuentro mis API Keys de ATH Movil?</h4>
+          <ol>
+            <li>Abre la app ATH Movil Business en tu telefono</li>
+            <li>Ve a Configuracion (Settings)</li>
+            <li>Busca la seccion "Desarrollo" o "Development"</li>
+            <li>Ahi encontraras tu Public Token y Private Token</li>
+          </ol>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <a href="/">← Volver al inicio</a>
+    </footer>
+  </div>
+</body>
+</html>

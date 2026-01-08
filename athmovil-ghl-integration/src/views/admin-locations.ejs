@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %></title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Locations Instaladas</h1>
+      <p class="subtitle">Panel de administracion</p>
+    </header>
+
+    <main>
+      <% if (locations.length === 0) { %>
+        <div class="empty-state">
+          <p>No hay locations instaladas todavia.</p>
+          <a href="/oauth/install" class="btn btn-primary">Instalar Primera Location</a>
+        </div>
+      <% } else { %>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Location ID</th>
+              <th>Company ID</th>
+              <th>ATH Movil</th>
+              <th>Instalada</th>
+              <th>Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% locations.forEach(function(loc) { %>
+              <tr>
+                <td><code><%= loc.locationId %></code></td>
+                <td><code><%= loc.companyId %></code></td>
+                <td>
+                  <% if (loc.athmovilPublicToken) { %>
+                    <span class="badge badge-success">Configurado</span>
+                  <% } else { %>
+                    <span class="badge badge-warning">Pendiente</span>
+                  <% } %>
+                </td>
+                <td><%= new Date(loc.installedAt).toLocaleDateString('es-PR') %></td>
+                <td>
+                  <a href="/setup?locationId=<%= loc.locationId %>" class="btn btn-small">Configurar</a>
+                </td>
+              </tr>
+            <% }); %>
+          </tbody>
+        </table>
+      <% } %>
+    </main>
+
+    <footer>
+      <a href="/">← Volver al inicio</a>
+    </footer>
+  </div>
+</body>
+</html>
