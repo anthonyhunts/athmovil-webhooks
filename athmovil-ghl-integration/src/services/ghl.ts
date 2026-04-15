@@ -1,6 +1,7 @@
 import axios, { AxiosInstance } from 'axios';
 import { config } from '../config';
-import { GHLTokenResponse, GHLLocation } from '../types';
+import { GHLTokenResponse } from '../types';
+import { storage } from './storage';
 
 export class GHLService {
   private client: AxiosInstance;
@@ -8,12 +9,46 @@ export class GHLService {
   constructor() {
     this.client = axios.create({
       baseURL: config.ghl.apiUrl,
+      timeout: 15000,
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
         'Version': '2021-07-28',
       },
     });
+  }
+
+  /**
+   * Obtener un access token valido para una location.
+   * Si el token esta expirado, lo refresca automaticamente.
+   */
+  async getValidAccessToken(locationId: string): Promise<string> {
+    const location = storage.getLocation(locationId);
+    if (!location) {
+      throw new Error(`Location ${locationId} not found`);
+    }
+
+    // Si el token expira en menos de 5 minutos, refrescar
+    const fiveMinutes = 5 * 60 * 1000;
+    if (location.expiresAt.getTime() - Date.now() < fiveMinutes) {
+      console.log('🔄 Token expiring soon, refreshing for:', locationId);
+      try {
+        const newTokens = await this.refreshAccessToken(location.refreshToken);
+
+        location.accessToken = newTokens.access_token;
+        location.refreshToken = newTokens.refresh_token;
+        location.expiresAt = new Date(Date.now() + newTokens.expires_in * 1000);
+        storage.saveLocation(location);
+
+        return newTokens.access_token;
+      } catch (err) {
+        console.error('❌ Token refresh failed for:', locationId, err);
+        // Intentar con el token actual si el refresh falla
+        return location.accessToken;
+      }
+    }
+
+    return location.accessToken;
   }
 
   /**
@@ -31,9 +66,8 @@ export class GHLService {
           redirect_uri: `${config.baseUrl}/oauth/callback`,
         }),
         {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          timeout: 15000,
         }
       );
 
@@ -59,9 +93,8 @@ export class GHLService {
           refresh_token: refreshToken,
         }),
         {
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          timeout: 15000,
         }
       );
 
@@ -74,52 +107,22 @@ export class GHLService {
   }
 
   /**
-   * Obtener informacion de una location
-   */
-  async getLocation(locationId: string, accessToken: string): Promise<GHLLocation> {
-    try {
-      const response = await this.client.get(`/locations/${locationId}`, {
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-        },
-      });
-
-      return response.data.location;
-    } catch (error: any) {
-      console.error('❌ GHL getLocation error:', error.response?.data || error.message);
-      throw new Error(error.response?.data?.message || 'Failed to get location');
-    }
-  }
-
-  /**
    * Crear configuracion del payment provider para una location
    */
   async createPaymentProviderConfig(
     locationId: string,
-    accessToken: string,
     providerConfig: {
-      live: {
-        apiKey: string;
-        publishableKey: string;
-      };
-      test: {
-        apiKey: string;
-        publishableKey: string;
-      };
+      live: { apiKey: string; publishableKey: string };
+      test: { apiKey: string; publishableKey: string };
     }
   ): Promise<any> {
+    const accessToken = await this.getValidAccessToken(locationId);
+
     try {
       const response = await this.client.post(
         '/payments/custom-provider/provider',
-        {
-          locationId,
-          ...providerConfig,
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-          },
-        }
+        { locationId, ...providerConfig },
+        { headers: { 'Authorization': `Bearer ${accessToken}` } }
       );
 
       console.log('✅ Payment provider config created for:', locationId);
@@ -131,34 +134,31 @@ export class GHLService {
   }
 
   /**
-   * Notificar a GHL sobre el resultado de una transaccion
+   * Notificar a GHL sobre el resultado de una transaccion.
+   * Usa auto-refresh de tokens.
    */
   async notifyTransactionResult(
     locationId: string,
-    accessToken: string,
     transactionId: string,
     result: {
       success: boolean;
       chargeId?: string;
       message?: string;
     }
-  ): Promise<any> {
+  ): Promise<void> {
     try {
-      const response = await this.client.post(
+      const accessToken = await this.getValidAccessToken(locationId);
+
+      await this.client.post(
         `/payments/transactions/${transactionId}/notify`,
         result,
-        {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`,
-          },
-        }
+        { headers: { 'Authorization': `Bearer ${accessToken}` } }
       );
 
       console.log('📤 GHL notified about transaction:', transactionId);
-      return response.data;
     } catch (error: any) {
       console.error('❌ GHL notifyTransaction error:', error.response?.data || error.message);
-      // No throw - notification failure shouldn't break the flow
+      // Log but don't throw - notification failure shouldn't break webhook processing
     }
   }
 
@@ -181,5 +181,4 @@ export class GHLService {
   }
 }
 
-// Singleton para uso global
 export const ghlService = new GHLService();

@@ -12,6 +12,7 @@ import paymentRoutes from './routes/payments';
 
 // Services
 import { storage } from './services/storage';
+import { ATHMovilService } from './services/athmovil';
 
 const app = express();
 
@@ -106,16 +107,24 @@ app.get('/setup', (req, res) => {
 });
 
 // Save ATH Movil config for a location
-app.post('/setup', (req, res) => {
+app.post('/setup', async (req, res) => {
   const { locationId, athmovilPublicToken, athmovilPrivateToken } = req.body;
 
-  if (!locationId) {
+  if (!locationId || typeof locationId !== 'string') {
     return res.status(400).json({ success: false, message: 'locationId required' });
+  }
+
+  if (!athmovilPublicToken || typeof athmovilPublicToken !== 'string') {
+    return res.status(400).json({ success: false, message: 'ATH Movil Public Token required' });
+  }
+
+  if (!athmovilPrivateToken || typeof athmovilPrivateToken !== 'string') {
+    return res.status(400).json({ success: false, message: 'ATH Movil Private Token required' });
   }
 
   const location = storage.getLocation(locationId);
   if (!location) {
-    return res.status(404).json({ success: false, message: 'Location not found' });
+    return res.status(404).json({ success: false, message: 'Location not found. Please install the app first.' });
   }
 
   // Actualizar con credenciales de ATH Movil
@@ -123,7 +132,21 @@ app.post('/setup', (req, res) => {
   location.athmovilPrivateToken = athmovilPrivateToken;
   storage.saveLocation(location);
 
-  res.json({ success: true, message: 'ATH Movil credentials saved' });
+  // Suscribir webhook de ATH Movil automaticamente
+  const webhookUrl = `${config.baseUrl}/webhooks/athmovil`;
+  try {
+    const athMovil = new ATHMovilService(athmovilPublicToken, athmovilPrivateToken);
+    await athMovil.subscribeWebhook(webhookUrl);
+    console.log('🔔 ATH Movil webhook subscribed for location:', locationId);
+    res.json({ success: true, message: 'ATH Movil credentials saved and webhook subscribed' });
+  } catch (webhookError: any) {
+    console.warn('⚠️ Webhook subscription failed (credentials saved):', webhookError.message);
+    res.json({
+      success: true,
+      message: 'ATH Movil credentials saved. Webhook subscription failed - you may need to subscribe manually.',
+      webhookWarning: webhookError.message,
+    });
+  }
 });
 
 // Admin - ver locations instaladas

@@ -3,7 +3,6 @@ import { config } from '../config';
 import {
   ATHMovilPaymentRequest,
   ATHMovilPaymentResponse,
-  ATHMovilFindPaymentRequest,
   ATHMovilFindPaymentResponse,
 } from '../types';
 
@@ -18,6 +17,7 @@ export class ATHMovilService {
 
     this.client = axios.create({
       baseURL: config.athMovil.apiUrl,
+      timeout: 30000, // 30 seconds max
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
@@ -26,8 +26,14 @@ export class ATHMovilService {
   }
 
   /**
+   * Verificar que las credenciales estan configuradas
+   */
+  hasCredentials(): boolean {
+    return !!(this.publicToken && this.privateToken);
+  }
+
+  /**
    * Crear una nueva transaccion de pago
-   * Retorna ecommerceId y auth_token para el flujo de pago
    */
   async createPayment(params: {
     total: number;
@@ -45,15 +51,24 @@ export class ATHMovilService {
     }>;
     timeout?: number;
   }): Promise<ATHMovilPaymentResponse> {
+    if (!this.hasCredentials()) {
+      throw new Error('ATH Movil credentials not configured');
+    }
+
+    // Validar rango de ATH Movil: $1.00 - $1,500.00
+    if (params.total < 1 || params.total > 1500) {
+      throw new Error('Amount must be between $1.00 and $1,500.00');
+    }
+
     const payload: ATHMovilPaymentRequest = {
       publicToken: this.publicToken,
       total: params.total,
       tax: params.tax,
       subtotal: params.subtotal,
-      metadata1: params.metadata1,
-      metadata2: params.metadata2,
+      metadata1: params.metadata1 ? params.metadata1.substring(0, 40) : undefined,
+      metadata2: params.metadata2 ? params.metadata2.substring(0, 40) : undefined,
       items: params.items,
-      timeout: params.timeout || 600, // 10 minutos por defecto
+      timeout: Math.min(Math.max(params.timeout || 600, 120), 600),
     };
 
     try {
@@ -74,15 +89,17 @@ export class ATHMovilService {
    * Consultar el estado de una transaccion
    */
   async findPayment(ecommerceId: string): Promise<ATHMovilFindPaymentResponse> {
-    const payload: ATHMovilFindPaymentRequest = {
-      publicToken: this.publicToken,
-      ecommerceId,
-    };
+    if (!this.publicToken) {
+      throw new Error('ATH Movil public token not configured');
+    }
 
     try {
       const response = await this.client.post<ATHMovilFindPaymentResponse>(
         '/business-transaction/ecommerce/business/findPayment',
-        payload
+        {
+          publicToken: this.publicToken,
+          ecommerceId,
+        }
       );
 
       console.log('📋 ATH Movil payment status:', ecommerceId, '->', response.data.data.status);
@@ -100,14 +117,9 @@ export class ATHMovilService {
     try {
       const response = await this.client.post(
         '/business-transaction/ecommerce/updatePhoneNumber',
+        { ecommerceId, phoneNumber },
         {
-          ecommerceId,
-          phoneNumber,
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${authToken}`,
-          },
+          headers: { 'Authorization': `Bearer ${authToken}` },
         }
       );
 
@@ -123,6 +135,14 @@ export class ATHMovilService {
    * Procesar refund (reembolso)
    */
   async refundPayment(referenceNumber: string, amount: number): Promise<any> {
+    if (!this.hasCredentials()) {
+      throw new Error('ATH Movil credentials not configured');
+    }
+
+    if (amount <= 0) {
+      throw new Error('Refund amount must be greater than 0');
+    }
+
     try {
       const response = await this.client.post(
         '/business-transaction/ecommerce/refund',
@@ -146,18 +166,26 @@ export class ATHMovilService {
    * Suscribir webhook listener
    */
   async subscribeWebhook(listenerURL: string): Promise<any> {
+    if (!this.hasCredentials()) {
+      throw new Error('ATH Movil credentials not configured');
+    }
+
     try {
-      const response = await axios.post(config.athMovil.webhookUrl, {
-        publicToken: this.publicToken,
-        privateToken: this.privateToken,
-        listenerURL,
-        paymentReceivedEvent: true,
-        refundSentEvent: true,
-        donationReceivedEvent: true,
-        ecommercePaymentReceivedEvent: true,
-        ecommercePaymentCancelledEvent: true,
-        ecommercePaymentExpiredEvent: true,
-      });
+      const response = await axios.post(
+        config.athMovil.webhookUrl,
+        {
+          publicToken: this.publicToken,
+          privateToken: this.privateToken,
+          listenerURL,
+          paymentReceivedEvent: true,
+          refundSentEvent: true,
+          donationReceivedEvent: true,
+          ecommercePaymentReceivedEvent: true,
+          ecommercePaymentCancelledEvent: true,
+          ecommercePaymentExpiredEvent: true,
+        },
+        { timeout: 15000 }
+      );
 
       console.log('🔔 Webhook subscribed:', listenerURL);
       return response.data;
@@ -167,13 +195,9 @@ export class ATHMovilService {
     }
   }
 
-  /**
-   * Verificar si el token es modo test (dummy)
-   */
   isTestMode(): boolean {
     return this.publicToken.toLowerCase() === 'dummy';
   }
 }
 
-// Singleton para uso global
 export const athMovilService = new ATHMovilService();

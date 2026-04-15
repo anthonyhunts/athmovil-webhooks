@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import { storage } from '../services/storage';
 import { ghlService } from '../services/ghl';
 import { ATHMovilWebhookPayload } from '../types';
@@ -6,117 +7,132 @@ import { ATHMovilWebhookPayload } from '../types';
 const router = Router();
 
 /**
+ * Normalizar estado de ATH Movil a minusculas
+ */
+function normalizeStatus(status: string): string {
+  return status.toLowerCase();
+}
+
+/**
+ * Verificar que un webhook de ATH Movil es valido.
+ * ATH Movil no proporciona firmas HMAC, asi que verificamos contra
+ * nuestras transacciones existentes para confirmar legitimidad.
+ */
+function verifyATHMovilWebhook(payload: ATHMovilWebhookPayload): boolean {
+  if (!payload.transactionType || !payload.status) {
+    return false;
+  }
+
+  // Si tiene ecommerceId, verificar que existe en nuestro sistema
+  if (payload.ecommerceId) {
+    const transaction = storage.getTransactionByATHMovilId(payload.ecommerceId);
+    if (!transaction) {
+      console.warn('⚠️ Webhook for unknown ecommerceId:', payload.ecommerceId);
+      return false;
+    }
+  }
+
+  // Si tiene metadata1 (nuestro GHL transactionId), verificar
+  if (payload.metadata1 && !payload.ecommerceId) {
+    const transaction = storage.getTransactionByGHLId(payload.metadata1);
+    if (!transaction) {
+      console.warn('⚠️ Webhook for unknown GHL transactionId:', payload.metadata1);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
  * POST /webhooks/athmovil
  * Recibe notificaciones de ATH Movil sobre eventos de pago
- *
- * Eventos soportados:
- * - ecommerce (completed, cancelled, expired)
- * - payment (completed)
- * - refund (completed)
- * - donation (completed)
  */
 router.post('/athmovil', async (req: Request, res: Response) => {
   const payload = req.body as ATHMovilWebhookPayload;
 
   console.log('🔔 ATH Movil webhook received:', payload.transactionType, '->', payload.status);
 
+  // Verificar legitimidad basica
+  if (!verifyATHMovilWebhook(payload)) {
+    console.warn('⚠️ Webhook verification failed, ignoring');
+    return res.status(200).json({ received: true, verified: false });
+  }
+
   try {
-    // Buscar la transaccion por ecommerceId o metadata
+    // Buscar la transaccion
     let transaction = payload.ecommerceId
       ? storage.getTransactionByATHMovilId(payload.ecommerceId)
       : undefined;
 
-    // Tambien buscar por metadata1 si contiene el GHL transactionId
     if (!transaction && payload.metadata1) {
       transaction = storage.getTransactionByGHLId(payload.metadata1);
     }
 
     if (!transaction) {
-      console.warn('⚠️ Transaction not found for webhook:', payload.ecommerceId || payload.referenceNumber);
-      // Aun asi respondemos 200 para que ATH Movil no reintente
       return res.status(200).json({ received: true, matched: false });
     }
 
-    // Procesar segun el tipo y estado
-    const status = payload.status.toLowerCase();
-    const type = payload.transactionType.toLowerCase();
+    // Prevenir procesamiento duplicado
+    if (
+      transaction.status === 'completed' ||
+      transaction.status === 'refunded'
+    ) {
+      console.log('ℹ️ Transaction already in final state:', transaction.id, transaction.status);
+      return res.status(200).json({ received: true, alreadyProcessed: true });
+    }
+
+    const status = normalizeStatus(payload.status);
 
     if (status === 'completed') {
-      // Pago completado
       storage.updateTransactionStatus(
         transaction.id,
         'completed',
         payload.referenceNumber
       );
 
-      // Notificar a GHL
-      const location = storage.getLocation(transaction.ghlLocationId);
-      if (location) {
-        await ghlService.notifyTransactionResult(
-          transaction.ghlLocationId,
-          location.accessToken,
-          transaction.ghlTransactionId,
-          {
-            success: true,
-            chargeId: transaction.id,
-          }
-        );
-      }
+      await ghlService.notifyTransactionResult(
+        transaction.ghlLocationId,
+        transaction.ghlTransactionId,
+        { success: true, chargeId: transaction.id }
+      );
 
       console.log('✅ Payment completed:', transaction.id);
     } else if (status === 'cancel' || status === 'cancelled') {
-      // Pago cancelado por el usuario
       storage.updateTransactionStatus(transaction.id, 'cancelled');
 
-      const location = storage.getLocation(transaction.ghlLocationId);
-      if (location) {
-        await ghlService.notifyTransactionResult(
-          transaction.ghlLocationId,
-          location.accessToken,
-          transaction.ghlTransactionId,
-          {
-            success: false,
-            message: 'Payment cancelled by user',
-          }
-        );
-      }
+      await ghlService.notifyTransactionResult(
+        transaction.ghlLocationId,
+        transaction.ghlTransactionId,
+        { success: false, message: 'Payment cancelled by user' }
+      );
 
       console.log('❌ Payment cancelled:', transaction.id);
     } else if (status === 'expired') {
-      // Pago expirado (timeout)
       storage.updateTransactionStatus(transaction.id, 'expired');
 
-      const location = storage.getLocation(transaction.ghlLocationId);
-      if (location) {
-        await ghlService.notifyTransactionResult(
-          transaction.ghlLocationId,
-          location.accessToken,
-          transaction.ghlTransactionId,
-          {
-            success: false,
-            message: 'Payment expired',
-          }
-        );
-      }
+      await ghlService.notifyTransactionResult(
+        transaction.ghlLocationId,
+        transaction.ghlTransactionId,
+        { success: false, message: 'Payment expired' }
+      );
 
       console.log('⏰ Payment expired:', transaction.id);
     }
 
-    // Responder exitosamente
     res.status(200).json({ received: true, matched: true, transactionId: transaction.id });
   } catch (error: any) {
     console.error('❌ Webhook processing error:', error);
-    // Aun respondemos 200 para evitar reintentos
     res.status(200).json({ received: true, error: error.message });
   }
 });
 
 /**
  * POST /webhooks/ghl
- * Recibe webhooks de Go High Level (instalacion, desinstalacion, etc)
+ * Recibe webhooks de Go High Level
  */
 router.post('/ghl', async (req: Request, res: Response) => {
-  const { type, locationId, data } = req.body;
+  const { type, locationId } = req.body;
 
   console.log('🔔 GHL webhook received:', type);
 

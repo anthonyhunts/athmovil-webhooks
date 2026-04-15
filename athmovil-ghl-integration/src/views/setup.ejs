@@ -46,9 +46,8 @@
               type="password"
               id="athmovilPrivateToken"
               name="athmovilPrivateToken"
-              placeholder="Tu Private Token de ATH Movil Business"
-              value="<%= location?.athmovilPrivateToken || '' %>"
-              required
+              placeholder="<%= location?.athmovilPrivateToken ? '••••••••••••• (ya configurado)' : 'Tu Private Token de ATH Movil Business' %>"
+              <%= location?.athmovilPrivateToken ? '' : 'required' %>
             >
             <small>Mantener este token seguro - nunca compartirlo</small>
           </div>

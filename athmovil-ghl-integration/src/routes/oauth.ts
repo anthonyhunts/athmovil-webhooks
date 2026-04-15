@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import { ghlService } from '../services/ghl';
 import { storage } from '../services/storage';
 import { config } from '../config';
@@ -11,13 +12,12 @@ const router = Router();
  * Inicia el flujo de OAuth - redirige al usuario a GHL para autorizar
  */
 router.get('/authorize', (req: Request, res: Response) => {
-  const state = Math.random().toString(36).substring(7);
-
-  // Guardar state en session para validar despues
+  // Generar state criptograficamente seguro para prevenir CSRF
+  const state = crypto.randomBytes(32).toString('hex');
   (req.session as any).oauthState = state;
 
   const authUrl = ghlService.getAuthorizationUrl(state);
-  console.log('🔐 Redirecting to GHL OAuth:', authUrl);
+  console.log('🔐 Redirecting to GHL OAuth');
 
   res.redirect(authUrl);
 });
@@ -45,6 +45,19 @@ router.get('/callback', async (req: Request, res: Response) => {
       message: 'No se recibio codigo de autorizacion',
     });
   }
+
+  // Validar state para prevenir CSRF
+  const savedState = (req.session as any).oauthState;
+  if (!state || state !== savedState) {
+    console.error('❌ OAuth state mismatch - possible CSRF attack');
+    return res.status(403).render('error', {
+      title: 'Error de Seguridad',
+      message: 'State mismatch - solicitud invalida. Por favor intenta de nuevo.',
+    });
+  }
+
+  // Limpiar state de la sesion
+  delete (req.session as any).oauthState;
 
   try {
     // Intercambiar codigo por tokens

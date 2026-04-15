@@ -8,9 +8,37 @@ import { StoredTransaction } from '../types';
 const router = Router();
 
 /**
+ * Normalizar estado de ATH Movil a minusculas
+ */
+function normalizeStatus(status: string): string {
+  return status.toLowerCase();
+}
+
+/**
+ * Validar request de inicio de pago
+ */
+function validateInitiateRequest(body: any): { valid: boolean; error?: string } {
+  if (!body.locationId || typeof body.locationId !== 'string') {
+    return { valid: false, error: 'locationId is required' };
+  }
+  if (!body.transactionId || typeof body.transactionId !== 'string') {
+    return { valid: false, error: 'transactionId is required' };
+  }
+  if (typeof body.amount !== 'number' || body.amount < 1 || body.amount > 1500) {
+    return { valid: false, error: 'amount must be a number between $1.00 and $1,500.00' };
+  }
+  if (body.phoneNumber) {
+    const cleaned = String(body.phoneNumber).replace(/\D/g, '');
+    if (cleaned.length !== 10) {
+      return { valid: false, error: 'phoneNumber must be 10 digits' };
+    }
+  }
+  return { valid: true };
+}
+
+/**
  * GET /payments/checkout
- * Esta es la paymentsUrl - GHL carga esta pagina en un iframe
- * Recibe los datos del pago via postMessage
+ * paymentsUrl - GHL carga esta pagina en un iframe
  */
 router.get('/checkout', (req: Request, res: Response) => {
   const { locationId } = req.query;
@@ -25,23 +53,25 @@ router.get('/checkout', (req: Request, res: Response) => {
 /**
  * POST /payments/initiate
  * Inicia una transaccion de pago con ATH Movil
- * Llamado desde el checkout via JavaScript
  */
 router.post('/initiate', async (req: Request, res: Response) => {
+  const validation = validateInitiateRequest(req.body);
+  if (!validation.valid) {
+    return res.status(400).json({ success: false, message: validation.error });
+  }
+
   const {
     locationId,
-    transactionId, // GHL transaction ID
+    transactionId,
     amount,
-    currency,
     productDetails,
-    contact,
     phoneNumber,
   } = req.body;
 
   console.log('💳 Payment initiate request:', { locationId, transactionId, amount });
 
   try {
-    // Verificar que la location existe
+    // Verificar que la location existe y tiene credenciales
     const location = storage.getLocation(locationId);
     if (!location) {
       return res.status(400).json({
@@ -50,31 +80,35 @@ router.post('/initiate', async (req: Request, res: Response) => {
       });
     }
 
-    // Crear servicio ATH Movil con credenciales de la location
     const athMovil = new ATHMovilService(
       location.athmovilPublicToken || config.athMovil.publicToken,
       location.athmovilPrivateToken || config.athMovil.privateToken
     );
 
+    if (!athMovil.hasCredentials()) {
+      return res.status(400).json({
+        success: false,
+        message: 'ATH Movil credentials not configured for this location.',
+      });
+    }
+
     // Crear pago en ATH Movil
     const athPayment = await athMovil.createPayment({
       total: amount,
-      metadata1: transactionId, // Guardar GHL transactionId para matching
+      metadata1: transactionId, // GHL transactionId para matching
       metadata2: locationId,
       items: productDetails
-        ? [
-            {
-              name: productDetails.name || 'Product',
-              description: productDetails.description || '',
-              quantity: 1,
-              price: amount,
-            },
-          ]
+        ? [{
+            name: productDetails.name || 'Product',
+            description: productDetails.description || '',
+            quantity: 1,
+            price: amount,
+          }]
         : undefined,
-      timeout: 600, // 10 minutos
+      timeout: 600,
     });
 
-    // Crear nuestra transaccion interna
+    // Crear transaccion interna
     const internalTransaction: StoredTransaction = {
       id: uuidv4(),
       ghlTransactionId: transactionId,
@@ -89,12 +123,13 @@ router.post('/initiate', async (req: Request, res: Response) => {
 
     storage.saveTransaction(internalTransaction);
 
-    // Si tenemos numero de telefono, enviamos la notificacion push
+    // Enviar push notification si tenemos numero de telefono
     if (phoneNumber) {
+      const cleanPhone = String(phoneNumber).replace(/\D/g, '');
       try {
         await athMovil.updatePhoneNumber(
           athPayment.data.ecommerceId,
-          phoneNumber,
+          cleanPhone,
           athPayment.data.auth_token
         );
       } catch (e) {
@@ -119,10 +154,14 @@ router.post('/initiate', async (req: Request, res: Response) => {
 
 /**
  * POST /payments/status
- * Consulta el estado de un pago
+ * Consulta el estado de un pago (usado por polling del checkout)
  */
 router.post('/status', async (req: Request, res: Response) => {
   const { chargeId, ecommerceId, locationId } = req.body;
+
+  if (!chargeId && !ecommerceId) {
+    return res.status(400).json({ success: false, message: 'chargeId or ecommerceId required' });
+  }
 
   try {
     const transaction = chargeId
@@ -130,105 +169,54 @@ router.post('/status', async (req: Request, res: Response) => {
       : storage.getTransactionByATHMovilId(ecommerceId);
 
     if (!transaction) {
-      return res.status(404).json({
-        success: false,
-        message: 'Transaction not found',
+      return res.status(404).json({ success: false, message: 'Transaction not found' });
+    }
+
+    // Si ya esta en estado final, retornar sin consultar ATH Movil
+    if (['completed', 'cancelled', 'expired', 'refunded'].includes(transaction.status)) {
+      return res.json({
+        success: true,
+        chargeId: transaction.id,
+        status: transaction.status,
+        referenceNumber: transaction.referenceNumber,
       });
     }
 
-    // Obtener credenciales de ATH Movil
-    const location = storage.getLocation(locationId || transaction.ghlLocationId);
+    // Consultar ATH Movil
+    const resolvedLocationId = locationId || transaction.ghlLocationId;
+    const location = storage.getLocation(resolvedLocationId);
     const athMovil = new ATHMovilService(
       location?.athmovilPublicToken,
       location?.athmovilPrivateToken
     );
 
-    // Consultar ATH Movil
-    const athStatus = await athMovil.findPayment(transaction.athmovilEcommerceId);
+    const athResult = await athMovil.findPayment(transaction.athmovilEcommerceId);
+    const athStatus = normalizeStatus(athResult.data.status);
 
-    const status = athStatus.data.status;
-    const isCompleted = status === 'COMPLETED';
-    const isCancelled = status === 'CANCEL';
-    const isExpired = status === 'EXPIRED';
+    let finalStatus: string = 'pending';
 
-    // Actualizar nuestro estado si es necesario
-    if (isCompleted && transaction.status !== 'completed') {
-      storage.updateTransactionStatus(
-        transaction.id,
-        'completed',
-        athStatus.data.referenceNumber
-      );
-    } else if (isCancelled && transaction.status !== 'cancelled') {
+    if (athStatus === 'completed') {
+      finalStatus = 'completed';
+      storage.updateTransactionStatus(transaction.id, 'completed', athResult.data.referenceNumber);
+    } else if (athStatus === 'cancel') {
+      finalStatus = 'cancelled';
       storage.updateTransactionStatus(transaction.id, 'cancelled');
-    } else if (isExpired && transaction.status !== 'expired') {
+    } else if (athStatus === 'expired') {
+      finalStatus = 'expired';
       storage.updateTransactionStatus(transaction.id, 'expired');
     }
 
     res.json({
       success: true,
       chargeId: transaction.id,
-      status: isCompleted ? 'completed' : isCancelled ? 'cancelled' : isExpired ? 'expired' : 'pending',
-      athmovilStatus: status,
-      referenceNumber: athStatus.data.referenceNumber,
+      status: finalStatus,
+      referenceNumber: athResult.data.referenceNumber,
     });
   } catch (error: any) {
     console.error('❌ Payment status error:', error);
     res.status(500).json({
       success: false,
       message: error.message || 'Failed to get payment status',
-    });
-  }
-});
-
-/**
- * POST /payments/confirm
- * Confirmar que el pago fue completado (llamado desde checkout)
- */
-router.post('/confirm', async (req: Request, res: Response) => {
-  const { chargeId } = req.body;
-
-  const transaction = storage.getTransaction(chargeId);
-  if (!transaction) {
-    return res.status(404).json({
-      success: false,
-      message: 'Transaction not found',
-    });
-  }
-
-  // Obtener estado actualizado
-  const location = storage.getLocation(transaction.ghlLocationId);
-  const athMovil = new ATHMovilService(
-    location?.athmovilPublicToken,
-    location?.athmovilPrivateToken
-  );
-
-  try {
-    const athStatus = await athMovil.findPayment(transaction.athmovilEcommerceId);
-
-    if (athStatus.data.status === 'COMPLETED') {
-      storage.updateTransactionStatus(
-        transaction.id,
-        'completed',
-        athStatus.data.referenceNumber
-      );
-
-      return res.json({
-        success: true,
-        chargeId: transaction.id,
-        referenceNumber: athStatus.data.referenceNumber,
-      });
-    } else {
-      return res.json({
-        success: false,
-        chargeId: transaction.id,
-        status: athStatus.data.status,
-        message: `Payment status: ${athStatus.data.status}`,
-      });
-    }
-  } catch (error: any) {
-    res.status(500).json({
-      success: false,
-      message: error.message,
     });
   }
 });
